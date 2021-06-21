@@ -1,0 +1,3 @@
+[submodule "torch-utils"]
+	path = torch-utils
+	url = git@github.com:VRehnberg/torch-utils.git

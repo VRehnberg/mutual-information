@@ -7,9 +7,13 @@ from torch.autograd.functional import jacobian
 
 from torchutils import batched_jacobian
 from torchutils.kmeans import kmeans
-from torchutils.named_tensors import * #lift_nameless
+from torchutils.named_tensors import lift_nameless
+from torchutils.named_tensors import *
 
 from network import NormalLinear
+
+
+torch.Tensor.__repr__ = lambda self: ", ".join(f"{name}: {s}" for name, s in zip(self.names, self.size()))
 
 
 def jacobian_mutual_information(jac_full, jac_blocks):
@@ -57,12 +61,12 @@ def quantized_mutual_information(
         [quantize(activations.index(mask, "neuron")) for mask in partition.unbind("module")],
         dim=-1,
     ).refine_names(..., "module")
-    
+
     # Compute pmfs
     activations_onehot = lift_nameless(nn.functional.one_hot)(
         quantized_activations
-    ).refine_names(..., "bin").float().align_to(..., "sample")
-    p_xy = activations_onehot @ activations_onehot.rename(module="module2", bin="bin2") / n_samples
+    ).refine_names(..., "bin").float()
+    p_xy = neinsum(activations_onehot, activations_onehot, sample=0, module=2, bin=2) / n_samples
     #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
 
     print(p_xy.names)
@@ -107,7 +111,7 @@ def main():
     
     # Try QMI
     n_modules = 2
-    in_size, out_size = (15, 7)
+    in_size, out_size = (150, 7)
     activations = torch.rand(2000, out_size).refine_names("sample", "neuron")
     partition = nn.functional.one_hot(
         torch.randint(n_modules, (out_size,))

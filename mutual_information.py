@@ -7,22 +7,27 @@ from torch.autograd.functional import jacobian
 
 from torchutils import batched_jacobian
 from torchutils.kmeans import kmeans
-from torchutils.named_tensors import lift_nameless
+from torchutils.named_tensors import lift_nameless, neinsum, ndiagonal
 from torchutils.named_tensors import *
+from torchutils.visualize import tensorshow
 
 from network import NormalLinear
 
 
-torch.Tensor.__repr__ = lambda self: ("Tensor(" +
-  ", ".join(f"{name}: {s}" for name, s in zip(self.names, self.size())) +
-")")
+torch.Tensor.__oldrepr__ = torch.Tensor.__repr__
+torch.Tensor.__repr__ = lambda self: (
+    "Tensor(" +
+        ", ".join(f"{name}: {s}" for name, s in zip(self.names, self.size())) +
+    ")" if self.nelement() > 9 else self.__oldrepr__()
+)
+
 
 def jacobian_mutual_information(jac_full, jac_blocks):
     assert jac_full.ndim == 3
 
     # Covariances
     def det(jac):
-        return jac.bmm(jac.transpose(1, 2)).det()
+        return neinsum(jac, jac, sample=1, neuron=2).rename(None).det()
 
     det_full = det(jac_full)
     det_blocks = torch.hstack([det(jac_block).view(-1, 1) for jac_block in jac_blocks])
@@ -70,8 +75,7 @@ def quantized_mutual_information(
     p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
     #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
 
-    print(p_xy.names)
-    #tensorshow(p_xy, )
+    tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
 
     # Compute pairwise mutual information
     p_x = ndiagonal(p_xy, module="module1", bin="bin1")
@@ -88,18 +92,19 @@ def gaussian_test(n_modules=2, in_size=15, out_size=7, batch_size=2000):
     # Gaussian test set-up
     network = NormalLinear(in_size, out_size)
     x = network.sample(batch_size)
-    activations = network(x)
+    activations = network(x).rename("sample", "neuron")
 
     # Partition the network
     partition = nn.functional.one_hot(torch.randint(n_modules, (out_size,))).bool().T
+    partition.rename_("module", "neuron")
 
     # True mutual information
-    mi = network.output_mutual_information(partition)
+    mi = lift_nameless(network.output_mutual_information, out_names=())(partition)
     print(f"MI: {mi}")
 
     # Local mutual information through Jacobian
-    jac_full = batched_jacobian(network, x)
-    jac_blocks = [jac_full[:, mask, :] for mask in partition]
+    jac_full = batched_jacobian(network, x).rename("sample", "neuron", "input")
+    jac_blocks = [index(jac_full, mask, "neuron") for mask in partition]
     lmi = jacobian_mutual_information(jac_full, jac_blocks)
     print(f"LMI: {lmi}")
 
@@ -113,16 +118,16 @@ def gaussian_test(n_modules=2, in_size=15, out_size=7, batch_size=2000):
 def main():
     
     # Try QMI
-    n_modules = 2
-    in_size, out_size = (150, 7)
-    activations = torch.rand(2000, out_size).refine_names("sample", "neuron")
-    partition = nn.functional.one_hot(
-        torch.randint(n_modules, (out_size,))
-    ).refine_names("neuron", "module").bool()
-    with torch.no_grad():
-        print(quantized_mutual_information(activations, partition, 10))
+    #n_modules = 2
+    #in_size, out_size = (150, 7)
+    #activations = torch.rand(2000, out_size).refine_names("sample", "neuron")
+    #partition = nn.functional.one_hot(
+    #    torch.randint(n_modules, (out_size,))
+    #).refine_names("neuron", "module").bool()
+    #with torch.no_grad():
+    #    print(quantized_mutual_information(activations, partition, 10))
     
-    #gaussian_test()
+    gaussian_test()
 
 
 if __name__ == "__main__":

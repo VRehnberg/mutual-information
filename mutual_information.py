@@ -13,8 +13,9 @@ from torchutils.named_tensors import *
 from network import NormalLinear
 
 
-torch.Tensor.__repr__ = lambda self: ", ".join(f"{name}: {s}" for name, s in zip(self.names, self.size()))
-
+torch.Tensor.__repr__ = lambda self: ("Tensor(" +
+  ", ".join(f"{name}: {s}" for name, s in zip(self.names, self.size())) +
+")")
 
 def jacobian_mutual_information(jac_full, jac_blocks):
     assert jac_full.ndim == 3
@@ -66,18 +67,20 @@ def quantized_mutual_information(
     activations_onehot = lift_nameless(nn.functional.one_hot)(
         quantized_activations
     ).refine_names(..., "bin").float()
-    p_xy = neinsum(activations_onehot, activations_onehot, sample=0, module=2, bin=2) / n_samples
+    p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
     #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
 
     print(p_xy.names)
     #tensorshow(p_xy, )
 
     # Compute pairwise mutual information
-    p_x = p_xy.diagonal(dim1="module", dim2="module2").diagonal(dim1="bin", dim2="bin2").refine_names("neuron", "bin")
-    p_y = p_x.rename(bin="bin2", module="module2")
+    p_x = ndiagonal(p_xy, module="module1", bin="bin1")
+    p_y = p_x.rename(bin="bin1", module="module1")
+    p_x = unsqueeze(unsqueeze(p_x, 1, "module1"), 3, "bin1")
+    p_y = unsqueeze(unsqueeze(p_y, 0, "module"), 2, "bin")
     #p_x = torch.einsum("iikk -> ik", p_xy)
-    qmin = p_xy.div(p_x).div(p_y).pow(p_xy).log().sum(("neuron", "neuron2"))
-    assert qmin.size("bin") == qmin.size("bin2") and qmin.ndim == 2
+    qmin = p_xy.div(p_x).div(p_y).pow(p_xy).log().sum(("bin", "bin1"))  # TODO double check
+    assert qmin.size("module") == qmin.size("module1") and qmin.ndim == 2
     return qmin
 
 

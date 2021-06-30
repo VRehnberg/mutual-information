@@ -109,7 +109,7 @@ def gaussian_test(n_modules=2, in_size=15, out_size=7, batch_size=2000):
     print(f"LMI: {lmi}")
 
     # Quantized mutual information through clustering
-    for k in range(2, 11, 2):
+    for k in [2, 3, 5, 10]:
         with torch.no_grad():
             qmi = quantized_mutual_information(activations, partition, k)
         print(f"QMI k={k}: {qmi}")
@@ -128,6 +128,9 @@ def main():
     #    print(quantized_mutual_information(activations, partition, 10))
     
     gaussian_test()
+
+    from matplotlib import pyplot as plt
+    plt.show()
 
 
 if __name__ == "__main__":

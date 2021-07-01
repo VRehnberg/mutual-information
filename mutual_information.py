@@ -1,5 +1,9 @@
+#!/usr/bin/env python
+
 import sys
 sys.path.append("torch-utils/src")
+
+import re
 
 import torch
 from torch import nn
@@ -15,11 +19,11 @@ from network import NormalLinear
 
 
 torch.Tensor.__oldrepr__ = torch.Tensor.__repr__
-torch.Tensor.__repr__ = lambda self: (
-    "Tensor(" +
-        ", ".join(f"{name}: {s}" for name, s in zip(self.names, self.size())) +
+torch.Tensor.__repr__ = lambda self: re.sub("\s+", " " ,(
+    "T(" +
+        ",".join(f"{name}: {s}" for name, s in zip(self.names, self.size())) +
     ")" if self.nelement() > 9 else self.__oldrepr__()
-)
+))
 
 
 def jacobian_mutual_information(jac_full, jac_blocks):
@@ -38,6 +42,7 @@ def jacobian_mutual_information(jac_full, jac_blocks):
     return jmi.mean(0)
 
 
+#@profile
 def quantized_mutual_information(
     activations,
     partition,
@@ -72,18 +77,17 @@ def quantized_mutual_information(
     activations_onehot = lift_nameless(nn.functional.one_hot)(
         quantized_activations
     ).refine_names(..., "bin").float()
-    p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
-    #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
+    for _ in range(100):
+        p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
+        #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
 
-    tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
+        #tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
 
-    # Compute pairwise mutual information
-    p_x = ndiagonal(p_xy, module="module1", bin="bin1")
-    p_x2 = neinsum(activations_onehot, activations_onehot, module=1, bin=1) / n_samples
-    assert lift_nameless(torch.allclose)(p_x, p_x2)
+        # Compute pairwise mutual information
+        p_x = neinsum(activations_onehot, activations_onehot, module=1, bin=1) / n_samples
     p_y = p_x.rename(bin="bin1", module="module1")
-    p_x = unsqueeze(unsqueeze(p_x, 1, "module1"), 3, "bin1")
-    p_y = unsqueeze(unsqueeze(p_y, 0, "module"), 2, "bin")
+    p_x = p_x.nunsqueeze(1, "module1").nunsqueeze(3, "bin1")
+    p_y = p_y.nunsqueeze(0, "module").nunsqueeze(2, "bin")
     #p_x = torch.einsum("iikk -> ik", p_xy)
     qmin = p_xy.div(p_x).div(p_y).pow(p_xy).log().sum(("bin", "bin1"))  # TODO double check
     assert qmin.size("module") == qmin.size("module1") and qmin.ndim == 2
@@ -111,7 +115,7 @@ def gaussian_test(n_modules=2, in_size=15, out_size=7, batch_size=2000):
     print(f"LMI: {lmi}")
 
     # Quantized mutual information through clustering
-    for k in [2, 3, 5, 10]:
+    for k in [10]:
         with torch.no_grad():
             qmi = quantized_mutual_information(activations, partition, k)
         print(f"QMI k={k}: {qmi}")
@@ -132,7 +136,6 @@ def main():
     gaussian_test()
 
     from matplotlib import pyplot as plt
-    plt.show()
 
 
 if __name__ == "__main__":

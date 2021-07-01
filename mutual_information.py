@@ -80,7 +80,7 @@ def quantized_mutual_information(
     # Compute pairwise mutual information
     p_x = ndiagonal(p_xy, module="module1", bin="bin1")
     p_x2 = neinsum(activations_onehot, activations_onehot, module=1, bin=1) / n_samples
-    assert torch.allclose(p_x, p_x2)
+    assert lift_nameless(torch.allclose)(p_x, p_x2)
     p_y = p_x.rename(bin="bin1", module="module1")
     p_x = unsqueeze(unsqueeze(p_x, 1, "module1"), 3, "bin1")
     p_y = unsqueeze(unsqueeze(p_y, 0, "module"), 2, "bin")

@@ -1,6 +1,13 @@
 # Project specific
 torchutils/
+
+# Filing issues
 collect_env.py
+
+# Line-profiling
+*.prof
+*.lprof
+
 
 # IDEs
 .vscode/

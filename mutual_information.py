@@ -11,7 +11,7 @@ from torch.autograd.functional import jacobian
 
 from torchutils import batched_jacobian
 from torchutils.kmeans import kmeans
-from torchutils.named_tensors import lift_nameless, neinsum, ndiagonal
+from torchutils.named_tensors import lift_nameless, neinsum, index
 from torchutils.named_tensors import *
 from torchutils.visualize import tensorshow
 
@@ -81,7 +81,7 @@ def quantized_mutual_information(
         p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
         #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
 
-        tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
+        #tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
 
         # Compute pairwise mutual information
         p_x = neinsum(activations_onehot, activations_onehot, module=1, bin=1) / n_samples

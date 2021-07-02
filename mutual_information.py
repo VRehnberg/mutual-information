@@ -81,13 +81,12 @@ def quantized_mutual_information(
         p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
         #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
 
-        #tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
+        tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
 
         # Compute pairwise mutual information
         p_x = neinsum(activations_onehot, activations_onehot, module=1, bin=1) / n_samples
-    p_y = p_x.rename(bin="bin1", module="module1")
-    p_x = p_x.nunsqueeze(1, "module1").nunsqueeze(3, "bin1")
-    p_y = p_y.nunsqueeze(0, "module").nunsqueeze(2, "bin")
+    p_y = p_x.rename(bin="bin1", module="module1").align_as(p_xy)
+    p_x = p_x.align_as(p_xy)
     #p_x = torch.einsum("iikk -> ik", p_xy)
     qmin = p_xy.div(p_x).div(p_y).pow(p_xy).log().sum(("bin", "bin1"))  # TODO double check
     assert qmin.size("module") == qmin.size("module1") and qmin.ndim == 2

@@ -11,12 +11,45 @@ from torch.autograd.functional import jacobian
 
 from torchutils import batched_jacobian
 from torchutils.kmeans import kmeans
-from torchutils.named_tensors import lift_nameless, neinsum, index
-from torchutils.named_tensors import *
+from torchutils.named_tensors import lift_nameless, index, nstack#neinsum
+#from torchutils.named_tensors import *
 from torchutils.visualize import tensorshow
 
 from network import NormalLinear
 
+
+from lenses import bind
+
+
+@profile
+def nflatten(self, **kwargs):
+    for name,olds in kwargs.items():
+        olds = tuple(bind(olds).Recur(str).collect())
+        if olds:
+            self = self.align_to(..., *olds).flatten(olds, name)
+        else:
+            self = self.rename(None).unsqueeze(-1).rename(*self.names, name)
+    return self
+
+torch.Tensor.nflatten = nflatten
+
+@profile
+def neinsum(input, other, **instructions):
+    renames = {n: n + "1" for n, i in instructions.items() if i == 2}
+    other = other.rename(**renames) if renames else other
+
+    # matmul <=> abc, acd -> abd
+    left = set(zip(input.names, input.shape))
+    right = set(zip(other.names, other.shape))
+    batch = {(n, input.size(n)) for n, i in instructions.items() if i == 1}
+    a = left & right & batch
+    b = left - right
+    c = left & right - batch
+    d = right - left
+    abc = input.nflatten(a=a,b=b,c=c)
+    acd = other.nflatten(a=a,c=c,d=d)
+    abd = abc @ acd
+    return abd.nunflatten(a=a,b=b,d=d)
 
 torch.Tensor.__oldrepr__ = torch.Tensor.__repr__
 torch.Tensor.__repr__ = lambda self: re.sub("\s+", " " ,(
@@ -34,15 +67,15 @@ def jacobian_mutual_information(jac_full, jac_blocks):
         return neinsum(jac, jac, sample=1, neuron=2).rename(None).det()
 
     det_full = det(jac_full)
-    det_blocks = torch.hstack([det(jac_block).view(-1, 1) for jac_block in jac_blocks])
+    det_blocks = nstack(*(det(jac_block) for jac_block in jac_blocks), name="block")
 
     # Local mutual information
-    jmi = -0.5 * torch.log(det_full / torch.prod(det_blocks, 1))
+    jmi = -0.5 * torch.log(det_full / det_blocks.prod("block"))
 
     return jmi.mean(0)
 
 
-#@profile
+@profile
 def quantized_mutual_information(
     activations,
     partition,
@@ -68,23 +101,24 @@ def quantized_mutual_information(
     else:
         raise ValueError()
 
-    quantized_activations = lift_nameless(torch.stack)(
-        [quantize(activations.index(mask, "neuron")) for mask in partition.unbind("module")],
-        dim=-1,
-    ).refine_names(..., "module")
+    quantized_activations = nstack(
+        *(quantize(activations.index(mask, "neuron")) for mask in partition.unbind("module")),
+        name="module",
+    )
 
     # Compute pmfs
-    activations_onehot = lift_nameless(nn.functional.one_hot)(
+    activations_onehot = lift_nameless(nn.functional.one_hot, add="bin")(
         quantized_activations
-    ).refine_names(..., "bin").float()
+    ).float()
     for _ in range(100):
-        p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
+        #p_xy = neinsum(activations_onehot, activations_onehot, module=2, bin=2) / n_samples
         #torch.einsum("bij, bkl -> ikjl", activations_onehot, activations_onehot) / batch_size
 
         #tensorshow(p_xy, xdims=["module", "bin"], ydims=["module1", "bin1"])
 
         # Compute pairwise mutual information
         p_x = neinsum(activations_onehot, activations_onehot, module=1, bin=1) / n_samples
+    return
     p_y = p_x.rename(bin="bin1", module="module1").align_as(p_xy)
     p_x = p_x.align_as(p_xy)
     #p_x = torch.einsum("iikk -> ik", p_xy)
@@ -93,7 +127,7 @@ def quantized_mutual_information(
     return qmin
 
 
-def gaussian_test(n_modules=2, in_size=15, out_size=7, batch_size=2000):
+def gaussian_test(n_modules=2, in_size=15, out_size=7, batch_size=10000):
     # Gaussian test set-up
     network = NormalLinear(in_size, out_size)
     x = network.sample(batch_size)
@@ -114,10 +148,10 @@ def gaussian_test(n_modules=2, in_size=15, out_size=7, batch_size=2000):
     print(f"LMI: {lmi}")
 
     # Quantized mutual information through clustering
-    for k in [10]:
+    for n_bins in [100]:
         with torch.no_grad():
-            qmi = quantized_mutual_information(activations, partition, k)
-        print(f"QMI k={k}: {qmi}")
+            qmi = quantized_mutual_information(activations, partition, n_bins)
+        print(f"QMI bins={n_bins}: {qmi}")
 
 
 def main():
@@ -135,7 +169,7 @@ def main():
     gaussian_test()
 
     from matplotlib import pyplot as plt
-
+    plt.show()
 
 if __name__ == "__main__":
     main()
